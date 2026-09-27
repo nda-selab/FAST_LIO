@@ -37,6 +37,8 @@
 #include <math.h>
 #include <thread>
 #include <fstream>
+#include <iomanip>
+#include <sstream>
 #include <csignal>
 #include <unistd.h>
 #include <Python.h>
@@ -753,6 +755,66 @@ void h_share_model(state_ikfom &s, esekfom::dyn_share_datastruct<double> &ekfom_
     solve_time += omp_get_wtime() - solve_start_;
 }
 
+static void printStartupConfig()
+{
+    const auto format_extrinsic = [](const std::vector<double>& values) {
+        std::ostringstream out;
+        out << std::setprecision(12) << "[";
+        for (std::size_t i = 0; i < values.size(); ++i)
+        {
+            if (i > 0)
+                out << (i % 3 == 0 ? "; " : ", ");
+            out << values[i];
+        }
+        out << "]";
+        return out.str();
+    };
+
+    ROS_INFO_STREAM(std::boolalpha << std::setprecision(12)
+        << "===== FAST_LIO startup configuration =====\n"
+        << "[common]\n"
+        << "  common/lid_topic = \"" << lid_topic << "\"\n"
+        << "  common/imu_topic = \"" << imu_topic << "\"\n"
+        << "  common/time_sync_en = " << time_sync_en << "\n"
+        << "  common/time_offset_lidar_to_imu = " << time_diff_lidar_to_imu << "\n"
+        << "[preprocess]\n"
+        << "  preprocess/blind = " << p_pre->blind << "\n"
+        << "  preprocess/lidar_type = " << p_pre->lidar_type << "\n"
+        << "  preprocess/scan_line = " << p_pre->N_SCANS << "\n"
+        << "  preprocess/timestamp_unit = " << p_pre->time_unit << "\n"
+        << "  preprocess/scan_rate = " << p_pre->SCAN_RATE << "\n"
+        << "  point_filter_num = " << p_pre->point_filter_num << "\n"
+        << "  feature_extract_enable = " << p_pre->feature_enabled << "\n"
+        << "[mapping]\n"
+        << "  max_iteration = " << NUM_MAX_ITERATIONS << "\n"
+        << "  filter_size_corner = " << filter_size_corner_min << "\n"
+        << "  filter_size_surf = " << filter_size_surf_min << "\n"
+        << "  filter_size_map = " << filter_size_map_min << "\n"
+        << "  cube_side_length = " << cube_len << "\n"
+        << "  mapping/det_range = " << DET_RANGE << "\n"
+        << "  mapping/fov_degree = " << fov_deg << "\n"
+        << "  internal/FOV_DEG = " << FOV_DEG << "\n"
+        << "  mapping/gyr_cov = " << gyr_cov << "\n"
+        << "  mapping/acc_cov = " << acc_cov << "\n"
+        << "  mapping/b_gyr_cov = " << b_gyr_cov << "\n"
+        << "  mapping/b_acc_cov = " << b_acc_cov << "\n"
+        << "  mapping/extrinsic_est_en = " << extrinsic_est_en << "\n"
+        << "  mapping/extrinsic_T = " << format_extrinsic(extrinT) << "\n"
+        << "  mapping/extrinsic_R = " << format_extrinsic(extrinR) << "\n"
+        << "[publish]\n"
+        << "  publish/path_en = " << path_en << "\n"
+        << "  publish/scan_publish_en = " << scan_pub_en << "\n"
+        << "  publish/dense_publish_en = " << dense_pub_en << "\n"
+        << "  publish/scan_bodyframe_pub_en = " << scan_body_pub_en << "\n"
+        << "[pcd_save]\n"
+        << "  pcd_save/pcd_save_en = " << pcd_save_en << "\n"
+        << "  pcd_save/interval = " << pcd_save_interval << "\n"
+        << "[logging and files]\n"
+        << "  runtime_pos_log_enable = " << runtime_pos_log << "\n"
+        << "  map_file_path = \"" << map_file_path << "\"\n"
+        << "=========================================");
+}
+
 int main(int argc, char** argv)
 {
     ros::init(argc, argv, "laserMapping");
@@ -793,7 +855,6 @@ int main(int argc, char** argv)
     nh.param<vector<double>>("mapping/extrinsic_R", extrinR, vector<double>());
 
     p_pre->lidar_type = lidar_type;
-    cout<<"p_pre->lidar_type "<<p_pre->lidar_type<<endl;
     
     path.header.stamp    = ros::Time::now();
     path.header.frame_id ="camera_init";
@@ -805,6 +866,7 @@ int main(int argc, char** argv)
     
     FOV_DEG = (fov_deg + 10.0) > 179.9 ? 179.9 : (fov_deg + 10.0);
     HALF_FOV_COS = cos((FOV_DEG) * 0.5 * PI_M / 180.0);
+    printStartupConfig();
 
     _featsArray.reset(new PointCloudXYZI());
 

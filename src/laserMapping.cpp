@@ -94,7 +94,8 @@ double cube_len = 0, HALF_FOV_COS = 0, FOV_DEG = 0, total_distance = 0, lidar_en
 int    effct_feat_num = 0, time_log_counter = 0, scan_count = 0, publish_count = 0;
 int    iterCount = 0, feats_down_size = 0, NUM_MAX_ITERATIONS = 0, laserCloudValidNum = 0, pcd_save_interval = -1, pcd_index = 0;
 bool   point_selected_surf[100000] = {0};
-bool   lidar_pushed, flg_first_scan = true, flg_exit = false, flg_EKF_inited;
+bool   lidar_pushed, flg_first_scan = true, flg_EKF_inited;
+volatile std::sig_atomic_t flg_exit = 0;
 bool   scan_pub_en = false, dense_pub_en = false, scan_body_pub_en = false;
 int lidar_type;
 
@@ -142,11 +143,10 @@ geometry_msgs::PoseStamped msg_body_pose;
 shared_ptr<Preprocess> p_pre(new Preprocess());
 shared_ptr<ImuProcess> p_imu(new ImuProcess());
 
-void SigHandle(int sig)
+void SigHandle(int)
 {
-    flg_exit = true;
-    ROS_WARN("catch sig %d", sig);
-    sig_buffer.notify_all();
+    // Keep signal handling async-signal-safe; clean up in the main thread.
+    flg_exit = 1;
 }
 
 inline void dump_lio_state_to_log(FILE *fp)  
@@ -817,7 +817,9 @@ static void printStartupConfig()
 
 int main(int argc, char** argv)
 {
-    ros::init(argc, argv, "laserMapping");
+    ros::init(argc, argv, "laserMapping", ros::init_options::NoSigintHandler);
+    std::signal(SIGINT, SigHandle);
+    std::signal(SIGTERM, SigHandle);
     ros::NodeHandle nh;
 
     nh.param<bool>("publish/path_en",path_en, true);
@@ -921,13 +923,12 @@ int main(int argc, char** argv)
     ros::Publisher pubPath          = nh.advertise<nav_msgs::Path> 
             ("/path", 100000);
 //------------------------------------------------------------------------------------------------------
-    signal(SIGINT, SigHandle);
-    ros::Rate rate(5000);
-    bool status = ros::ok();
-    while (status)
+    // /clock may stop when rosbag finishes or pauses. Keep checking shutdown.
+    ros::WallRate rate(5000);
+    while (ros::ok() && !flg_exit)
     {
-        if (flg_exit) break;
         ros::spinOnce();
+        if (flg_exit || !ros::ok()) break;
         if(sync_packages(Measures)) 
         {
             if (flg_first_scan)
@@ -1076,9 +1077,10 @@ int main(int argc, char** argv)
             }
         }
 
-        status = ros::ok();
         rate.sleep();
     }
+
+    ros::shutdown();
 
     /**************** save map ****************/
     /* 1. make sure you have enough memories
